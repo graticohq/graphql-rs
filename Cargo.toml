@@ -1,0 +1,13 @@
+[package]
+name = "warp-starwars"
+version = "0.1.1"
+authors = ["sunli <scott_s829@163.com>"]
+edition = "2018"
+
+[dependencies]
+async-graphql = "2.0"
+async-graphql-warp = "2.0" # If you need to integrate into warp
+tokio = { version = "1.0.2", features = ["macros", "rt-multi-thread"] }
+warp = "0.3"
+sqlx = { version = "0.5", features = [ "runtime-tokio-rustls", "postgres" ] }
+dotenv = "0.15.0"
