@@ -25,7 +25,6 @@ impl QueryRoot {
         }
     
 }
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub async fn db_connection() -> Result<PgPool> {
     let database_url = var("DATABASE_URL").expect("DATABASE_URL is not set");
