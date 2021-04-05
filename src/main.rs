@@ -12,7 +12,6 @@ use std::env::var;
 
 mod posts;
 
-
 struct QueryRoot;
 #[Object]
 impl QueryRoot {
@@ -46,7 +45,6 @@ async fn main() {
         .data(pg_pool)
         .finish();
 
-
     let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
 
     let graphql_post = async_graphql_warp::graphql(schema.clone()).and_then(
@@ -71,8 +69,6 @@ async fn main() {
     .or(graphql_playground)
     .or(graphql_post);
 
-
     println!("Playground: http://localhost:{}", port);
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
-
 }
