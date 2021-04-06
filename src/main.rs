@@ -68,6 +68,6 @@ async fn main() {
 
   let routes = hello.or(graphql_playground).or(graphql_post);
 
-  println!("Playground: http://localhost:{}", port);
+  println!("Playground - http://localhost:{}", port);
   warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 }
