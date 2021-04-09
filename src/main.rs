@@ -24,7 +24,7 @@ pub async fn db_connection() -> Result<PgPool> {
   Ok(pool)
 }
 
-pub fn from_cookie_header<'a>(header: String) -> std::result::Result<CookieJar, ParseError> {
+pub fn from_cookie_header(header: String) -> std::result::Result<CookieJar, ParseError> {
   let mut ret = CookieJar::default();
   let list = header.split("; ");
   for cookiestr in list {
@@ -35,37 +35,25 @@ pub fn from_cookie_header<'a>(header: String) -> std::result::Result<CookieJar, 
 
 pub fn get_cookie_jar(cookie_header: Option<String>) -> CookieJar {
   let jar = match cookie_header {
-    Some(header) => {
-      match from_cookie_header(header.to_owned()) {
-        Ok(jar) => jar,
-        Err(_) => CookieJar::default(),
-      }
+    Some(header) => match from_cookie_header(header.to_owned()) {
+      Ok(jar) => jar,
+      Err(_) => CookieJar::default(),
     },
     None => CookieJar::default(),
   };
   return jar;
 }
 
-pub fn get_cookie_header(jar: CookieJar) -> String {
-  return jar
-    .delta()
-    .map(|s| s.to_string())
-    .collect::<Vec<String>>()
-    .join(";");
-}
 
-pub fn get_context(db_pool: &PgPool, jar: &CookieJar) {
-  let ctx = graphql::graphql::GraphQLContext {
-    db_pool: db_pool,
-    cookie_jar: jar
-  };
-  ctx;
+pub fn get_context( jar: CookieJar) -> graphql::graphql::GraphQLContext {
+  let ctx = graphql::graphql::GraphQLContext::new(jar);
+  return ctx;
 }
 
 #[tokio::main]
 async fn main() {
   dotenv().ok();
-  let pg_pool:  PgPool = db_connection().await.expect("Database connection failed.");
+  let pg_pool: PgPool = db_connection().await.expect("Database connection failed.");
   let port = var("PORT")
     .expect("PORT is not set")
     .parse::<u16>()
@@ -80,7 +68,7 @@ async fn main() {
     graphql::graphql::QueryRoot,
     EmptyMutation,
     EmptySubscription,
-  )
+  ).data(pg_pool)
   .finish();
 
   let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
@@ -93,16 +81,15 @@ async fn main() {
         async_graphql::Request,
       )| {
         let jar = get_cookie_jar(cookie_header);
-        let ctx  =  get_context(&pg_pool, &jar);
-      async move {
-            request = request.data(ctx);
+//        let db_pool :  PgPool = pg_pool;
+        let ctx = get_context(jar);
+        let request = request.data(ctx);
+        async move {
           let resp = schema.execute(request).await;
-          let header = get_cookie_header(jar);
-          println!("{}", header);
           Ok::<_, Infallible>(warp::reply::with_header(
             Response::from(resp),
-            warp::http::header::SET_COOKIE,
-            header,
+            "",
+            "",
           ))
         }
       },

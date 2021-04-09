@@ -720,6 +720,7 @@ dependencies = [
  "async-graphql-warp",
  "cookie",
  "dotenv",
+ "http",
  "sqlx",
  "tokio",
  "warp",
