@@ -1,13 +1,9 @@
-pub mod graphql {
-
-  use async_graphql::{Context, FieldResult, Object};
+pub mod cookies {
   use cookie::{Cookie, ParseError};
   use std::sync::Arc;
-  use tokio::sync::Mutex;
-
   use time;
-
-  use sqlx::postgres::PgPool;
+  use tokio::sync::Mutex;
+  use warp::{Reply};
 
   pub type CookieJar = Arc<Mutex<Vec<String>>>;
 
@@ -16,15 +12,14 @@ pub mod graphql {
   }
 
   pub fn from_cookie_header(header: String) -> std::result::Result<CookieJar, ParseError> {
-    println!("got cookir {}", header);
     let mut vec: Vec<String> = Vec::new();
     let list = header.split("; ");
     for cookiestr in list {
       println!("got cookir {}", cookiestr);
       let cookie = Cookie::parse(cookiestr.to_owned());
       match cookie {
-          Ok(_) => vec.push(cookiestr.to_string()),
-          Err(_) => ()
+        Ok(_) => vec.push(cookiestr.to_string()),
+        Err(_) => (),
       }
     }
     let jar_mutex = get_cookiejar_mutex(vec);
@@ -42,25 +37,86 @@ pub mod graphql {
     return jar;
   }
 
-  pub struct QueryRoot;
-  #[Object]
-  impl QueryRoot {
-    async fn posts<'a>(&self, ctx: &Context<'_>) -> FieldResult<i64> {
-      let jar = ctx.data_unchecked::<CookieJar>();
-      let pg_pool = ctx.data_unchecked::<PgPool>();
-      let mut cookie_jar = jar.lock().await;
-
-      let cookie = Cookie::build("name", "value")
-        .path("/")
-        .secure(false)
-        .http_only(true)
-        .expires(time::OffsetDateTime::now_utc() + time::Duration::days(365))
-        .finish();
-      (*cookie_jar).push(cookie.to_string());
-      let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM api.projects")
-        .fetch_one(pg_pool)
-        .await?;
-      Ok(count)
+  pub async fn get_cookie(jar: &CookieJar, name: String) -> Option<String> {
+    let  cookie_jar = jar.lock().await;
+    let mut list = (*cookie_jar).iter().map(
+      |x| Cookie::parse(x.to_owned())
+    );
+    let index = list.find(|c| {
+      return match c {
+        Ok(v) => v.name() == name,
+        Err(_) => false
+      }
+    });
+    return match index {
+      Some(v) => match v {
+        Ok(c) => Some(c.value().to_string()),
+        Err(_) => None
+      },
+      None => None
     }
+  }
+
+  pub async fn set_cookie(jar: &CookieJar, name: String, value: String) {
+    let mut cookie_jar = jar.lock().await;
+    let cookie = Cookie::build(name, value)
+      .path("/")
+      .secure(false)
+      .http_only(true)
+      .expires(time::OffsetDateTime::now_utc() + time::Duration::days(365))
+      .finish();
+    (*cookie_jar).push(cookie.to_string());
+  }
+
+  pub async fn respond_with_jar(jar: &CookieJar, string: String) -> http::Response<warp::hyper::Body> {
+    let reply = warp::reply::with_status(warp::reply::html(string), http::StatusCode::OK);
+    let mut response = reply.into_response();
+    let mut cookie_jar = jar.lock().await;
+    let mut cookies_map = http::HeaderMap::new();
+    for cookie_str in (*cookie_jar).iter_mut() {
+      let cookie = Cookie::parse(cookie_str.to_owned());
+      match cookie {
+        Ok(cookie) => {
+          match cookie.expires() {
+            Some(_) => {
+              println!("setting cookie {}", cookie_str);
+              cookies_map.append(
+                http::header::SET_COOKIE,
+                http::HeaderValue::from_str(cookie_str).unwrap(),
+              );      
+            },
+            None => ()
+          }
+        },
+        Err(_) => (),
+      }
+
+    }
+    response.headers_mut().extend(cookies_map);
+    return response;
+  }
+}
+
+use async_graphql::{Context, FieldResult, Object};
+
+use sqlx::postgres::PgPool;
+
+pub struct QueryRoot;
+#[Object]
+impl QueryRoot {
+  async fn posts<'a>(&self, ctx: &Context<'_>) -> FieldResult<i64> {
+    let jar = ctx.data_unchecked::<cookies::CookieJar>();
+    let pg_pool = ctx.data_unchecked::<PgPool>();
+    let cv = cookies::get_cookie(jar, "n2".to_owned()).await;
+    match cv {
+      Some(v) => println!("found v {}", v),
+      None => println!("non")
+    }
+    cookies::set_cookie(&jar, "n2".to_string(), "vvv".to_string()).await;
+
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM api.projects")
+      .fetch_one(pg_pool)
+      .await?;
+    Ok(count)
   }
 }
