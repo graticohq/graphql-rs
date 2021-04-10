@@ -32,6 +32,5 @@ GRANT SELECT, UPDATE, INSERT ON ALL TABLES IN SCHEMA api TO anonymous;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA api TO anonymous;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA api TO anonymous;
 
-
 GRANT anonymous TO authenticator;
 GRANT anonymous TO api_user;

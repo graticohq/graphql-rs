@@ -1,4 +1,3 @@
-
 -- First we’ll need a table to keep track of our users:
 
 CREATE TABLE IF NOT EXISTS authentication.users (
@@ -7,23 +6,6 @@ CREATE TABLE IF NOT EXISTS authentication.users (
   password text NOT NULL CHECK (length(password) < 512),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
--- We would like the role to be a foreign key to actual database roles, however PostgreSQL does not support these constraints against the pg_roles table. We’ll use a trigger to manually enforce it.
-CREATE OR REPLACE FUNCTION authentication.check_role_exists ()
-  RETURNS TRIGGER
-  AS $$
-BEGIN
---  EXECUTE FORMAT('CREATE ROLE %s NOLOGIN', CONCAT('api_user_', new.id));
---  EXECUTE FORMAT('GRANT api_user TO %s', CONCAT('api_user_', new.id));
-  RETURN new;
-END
-$$
-LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS ensure_user_role_exists ON authentication.users;
-
-CREATE CONSTRAINT TRIGGER ensure_user_role_exists AFTER INSERT
- ON authentication.users FOR EACH ROW EXECUTE PROCEDURE authentication.check_role_exists ();
 
 -- Next we’ll use the pgcrypto extension and a trigger to keep passwords safe in the users table.
 
@@ -45,34 +27,6 @@ CREATE TRIGGER encrypt_pass
   BEFORE INSERT
   OR UPDATE ON authentication.users FOR EACH ROW
   EXECUTE PROCEDURE authentication.encrypt_pass ();
-
--- With the table in place we can make a helper to check a password against the encrypted column. It returns the database role for a user if the email and password are correct.
-
-CREATE OR REPLACE FUNCTION authentication.user_role (email text, password text)
-  RETURNS integer
-  LANGUAGE plpgsql
-  AS $$
-BEGIN
-  RETURN (
-    SELECT
-      id
-    FROM
-      authentication.users
-    WHERE
-      users.email = user_role.email
-      AND users.password = crypt(user_role.password, users.password));
-END;
-$$;
-
-
-CREATE TABLE IF NOT EXISTS authentication.tokens (
-  id SERIAL PRIMARY KEY,
-  user_id integer NOT NULL REFERENCES authentication.users (id) ON UPDATE CASCADE ON DELETE CASCADE,
-  token text NOT NULL DEFAULT uuid_generate_v1(),
-  is_revoked boolean NOT NULL DEFAULT false,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 
 CREATE OR REPLACE FUNCTION api.current_user_id()
   RETURNS integer
@@ -99,6 +53,24 @@ LANGUAGE plpgsql
 SECURITY DEFINER;
 
 
+-- With the table in place we can make a helper to check a password against the encrypted column. It returns the user_id for a user if the email and password are correct.
+
+CREATE OR REPLACE FUNCTION authentication.check_password (email text, password text)
+  RETURNS integer
+  LANGUAGE plpgsql
+  AS $$
+BEGIN
+  RETURN (
+    SELECT
+      id
+    FROM
+      authentication.users
+    WHERE
+      users.email = user_role.email
+      AND users.password = crypt(user_role.password, users.password));
+END;
+$$;
+
 CREATE TYPE api.token AS (token text, exp integer);
 
 CREATE OR REPLACE FUNCTION api.login (email text, password text)
@@ -110,7 +82,7 @@ DECLARE
   _token_id integer;
 BEGIN
   SELECT
-    authentication.user_role (email,
+    authentication.check_password (email,
       password) INTO _user_id;
   IF _user_id IS NULL THEN
     raise invalid_password
@@ -118,6 +90,7 @@ BEGIN
   END IF;
 
   INSERT INTO authentication.tokens (user_id) values(_user_id) RETURNING id, token INTO _token_id, _token;
+  -- add a admin scope(3) for user profile/projects/repos
   INSERT INTO authentication.scopes (token_id, profile_clearance, projects_clearance, repositories_clearance) values (_token_id, 3, 3, 3);
   RETURN (_token, extract(epoch FROM now())::integer + 60 * 60 * 24 * 180)::api.token;
 END;

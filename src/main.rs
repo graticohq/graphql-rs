@@ -63,16 +63,11 @@ async fn main() {
         Schema<graphql::QueryRoot, EmptyMutation, EmptySubscription>,
         async_graphql::Request,
       )| {
-        let jar = graphql::cookies::get_cookie_jar(cookie_header);
         async move {
-          let graphql_request = graphql_request.data(jar.clone());
-          let graphql_response = schema.execute(graphql_request).await;
-          let graphql_json = serde_json::to_string(&graphql_response).unwrap();
-          let response =
-            graphql::cookies::respond_with_jar(&jar, graphql_json).await;
-          Ok::<_, Infallible>(response)
+          let response = graphql::execute_graphql_request_with_cookies(schema, graphql_request, cookie_header).await;
+          Ok::<_, Infallible>(response)  
         }
-      },
+      }
     );
 
 
