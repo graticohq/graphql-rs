@@ -17,7 +17,8 @@ pub mod graphql {
     let mut vec: Vec<String> = Vec::new();
     let list = header.split("; ");
     for cookiestr in list {
-      let cookie = Cookie::parse(cookiestr.to_owned())?;
+        println!("got cookir {}", cookiestr);
+        let cookie = Cookie::parse(cookiestr.to_owned())?;
       vec.push(cookie.name().to_string())
     }
     let  jar_mutex = get_cookiejar_mutex(vec);

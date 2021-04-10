@@ -1,11 +1,8 @@
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
-use async_graphql::{Context, EmptyMutation, EmptySubscription, FieldResult, Object, Schema};
-use async_graphql_warp::Response;
+use async_graphql::{EmptyMutation, EmptySubscription,  Schema};
 use std::convert::Infallible;
-use std::sync::Arc;
 
 use http;
-use serde_json::Value;
 use warp::{http::Response as HttpResponse, Filter, Reply};
 
 use dotenv::dotenv;
@@ -36,7 +33,7 @@ async fn main() {
 
   println!("Booting graphQL Server on port {}", port);
 
-  let cookieSecret = var("COOKIE_SECRET").expect("COOKIE_SECRET is not set");
+//  let cookieSecret = var("COOKIE_SECRET").expect("COOKIE_SECRET is not set");
 
   let schema = Schema::build(
     graphql::graphql::QueryRoot,
@@ -51,31 +48,29 @@ async fn main() {
     .and(async_graphql_warp::graphql(schema))
     .and_then(
       move |cookie_header: Option<String>,
-            (schema, mut request): (
+            (schema, request): (
         Schema<graphql::graphql::QueryRoot, EmptyMutation, EmptySubscription>,
         async_graphql::Request,
       )| {
         let jar = graphql::graphql::get_cookie_jar(cookie_header);
         async move {
-          let j = jar.clone();
-          let request = request.data(j);
+          let request = request.data(jar.clone());
           let resp = schema.execute(request).await;
-          let mut cookie_jar = jar.lock().await;
-          let j = serde_json::to_string(&resp).unwrap();
+          let json = serde_json::to_string(&resp).unwrap();
+          let reply = warp::reply::with_status(warp::reply::html(json), http::StatusCode::OK);
+          let mut response = reply.into_response();
 
-          let reply = warp::reply::html(j);
-          let reply = warp::reply::with_status(reply, http::StatusCode::OK);
+          let mut cookie_jar = jar.lock().await;
           let mut cookies = http::HeaderMap::new();
-          for key in (*cookie_jar).iter_mut() {
-            println!("{}", key);
+          for cookie in (*cookie_jar).iter_mut() {
+            println!("setting cookie {}", cookie);
             cookies.append(
               http::header::SET_COOKIE,
-              http::HeaderValue::from_str(key).unwrap(),
+              http::HeaderValue::from_str(cookie).unwrap(),
             );
           }
-          let mut response = reply.into_response();
-          let headers = response.headers_mut();
-          headers.extend(cookies);
+          response.headers_mut().extend(cookies);
+
           Ok::<_, Infallible>(response)
         }
       },
