@@ -2,8 +2,10 @@ pub mod graphql {
 
   use async_graphql::{Context, FieldResult, Object};
   use cookie::{Cookie, ParseError};
-  use std::sync::{Arc};
+  use std::sync::Arc;
   use tokio::sync::Mutex;
+
+  use time;
 
   use sqlx::postgres::PgPool;
 
@@ -14,14 +16,18 @@ pub mod graphql {
   }
 
   pub fn from_cookie_header(header: String) -> std::result::Result<CookieJar, ParseError> {
+    println!("got cookir {}", header);
     let mut vec: Vec<String> = Vec::new();
     let list = header.split("; ");
     for cookiestr in list {
-        println!("got cookir {}", cookiestr);
-        let cookie = Cookie::parse(cookiestr.to_owned())?;
-      vec.push(cookie.name().to_string())
+      println!("got cookir {}", cookiestr);
+      let cookie = Cookie::parse(cookiestr.to_owned());
+      match cookie {
+          Ok(_) => vec.push(cookiestr.to_string()),
+          Err(_) => ()
+      }
     }
-    let  jar_mutex = get_cookiejar_mutex(vec);
+    let jar_mutex = get_cookiejar_mutex(vec);
     Ok(jar_mutex)
   }
 
@@ -31,11 +37,10 @@ pub mod graphql {
         Ok(jar) => jar,
         Err(_) => get_cookiejar_mutex(Vec::new()),
       },
-      None => get_cookiejar_mutex(Vec::new())
+      None => get_cookiejar_mutex(Vec::new()),
     };
     return jar;
   }
-
 
   pub struct QueryRoot;
   #[Object]
@@ -44,7 +49,13 @@ pub mod graphql {
       let jar = ctx.data_unchecked::<CookieJar>();
       let pg_pool = ctx.data_unchecked::<PgPool>();
       let mut cookie_jar = jar.lock().await;
-      let cookie = Cookie::new("name", "value");
+
+      let cookie = Cookie::build("name", "value")
+        .path("/")
+        .secure(false)
+        .http_only(true)
+        .expires(time::OffsetDateTime::now_utc() + time::Duration::days(365))
+        .finish();
       (*cookie_jar).push(cookie.to_string());
       let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM api.projects")
         .fetch_one(pg_pool)
