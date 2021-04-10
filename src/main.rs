@@ -2,11 +2,11 @@ use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql::{Context, EmptyMutation, EmptySubscription, FieldResult, Object, Schema};
 use async_graphql_warp::Response;
 use std::convert::Infallible;
-use std::fmt;
 use std::sync::Arc;
-use warp::{http::Response as HttpResponse, Filter};
 
-use cookie::{Cookie, CookieJar, Key, ParseError};
+use http;
+use serde_json::Value;
+use warp::{http::Response as HttpResponse, Filter, Reply};
 
 use dotenv::dotenv;
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -22,32 +22,6 @@ pub async fn db_connection() -> Result<PgPool> {
     .connect(&database_url)
     .await?;
   Ok(pool)
-}
-
-pub fn from_cookie_header(header: String) -> std::result::Result<CookieJar, ParseError> {
-  let mut ret = CookieJar::default();
-  let list = header.split("; ");
-  for cookiestr in list {
-    ret.add_original(Cookie::parse(cookiestr.to_owned())?);
-  }
-  Ok(ret)
-}
-
-pub fn get_cookie_jar(cookie_header: Option<String>) -> CookieJar {
-  let jar = match cookie_header {
-    Some(header) => match from_cookie_header(header.to_owned()) {
-      Ok(jar) => jar,
-      Err(_) => CookieJar::default(),
-    },
-    None => CookieJar::default(),
-  };
-  return jar;
-}
-
-
-pub fn get_context( jar: CookieJar) -> graphql::graphql::GraphQLContext {
-  let ctx = graphql::graphql::GraphQLContext::new(jar);
-  return ctx;
 }
 
 #[tokio::main]
@@ -68,7 +42,8 @@ async fn main() {
     graphql::graphql::QueryRoot,
     EmptyMutation,
     EmptySubscription,
-  ).data(pg_pool)
+  )
+  .data(pg_pool)
   .finish();
 
   let hello = warp::path!("hello" / String).map(|name| format!("Hello, {}!", name));
@@ -80,17 +55,28 @@ async fn main() {
         Schema<graphql::graphql::QueryRoot, EmptyMutation, EmptySubscription>,
         async_graphql::Request,
       )| {
-        let jar = get_cookie_jar(cookie_header);
-//        let db_pool :  PgPool = pg_pool;
-        let ctx = get_context(jar);
-        let request = request.data(ctx);
+        let jar = graphql::graphql::get_cookie_jar(cookie_header);
         async move {
+          let j = jar.clone();
+          let request = request.data(j);
           let resp = schema.execute(request).await;
-          Ok::<_, Infallible>(warp::reply::with_header(
-            Response::from(resp),
-            "",
-            "",
-          ))
+          let mut cookie_jar = jar.lock().await;
+          let j = serde_json::to_string(&resp).unwrap();
+
+          let reply = warp::reply::html(j);
+          let reply = warp::reply::with_status(reply, http::StatusCode::OK);
+          let mut cookies = http::HeaderMap::new();
+          for key in (*cookie_jar).iter_mut() {
+            println!("{}", key);
+            cookies.append(
+              http::header::SET_COOKIE,
+              http::HeaderValue::from_str(key).unwrap(),
+            );
+          }
+          let mut response = reply.into_response();
+          let headers = response.headers_mut();
+          headers.extend(cookies);
+          Ok::<_, Infallible>(response)
         }
       },
     );
