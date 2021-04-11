@@ -1,11 +1,11 @@
-use std::convert::Infallible;
 use dotenv::dotenv;
+use std::convert::Infallible;
 use std::env::var;
 
+use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
+use async_graphql::{EmptyMutation, EmptySubscription, Schema};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use warp::{http::Response as HttpResponse, Filter, Rejection};
-use async_graphql::{EmptyMutation, EmptySubscription, Schema};
-use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 
 mod graphql;
 
@@ -24,7 +24,10 @@ pub fn get_hello_route() -> impl Filter<Extract = (String,), Error = Rejection> 
   warp::path!("hello" / String).map(|name| format!("Hello, {}!", name))
 }
 
-pub fn get_graphql_playground_route() -> impl Filter<Extract = (std::result::Result<http::Response<String>, http::Error>,), Error = Rejection> + Clone {
+pub fn get_graphql_playground_route() -> impl Filter<
+  Extract = (std::result::Result<http::Response<String>, http::Error>,),
+  Error = Rejection,
+> + Clone {
   warp::path::end().and(warp::get()).map(|| {
     HttpResponse::builder()
       .header("content-type", "text/html")
@@ -46,11 +49,9 @@ async fn main() {
 
   println!("Booting graphQL Server on port {}", port);
 
-  //  let cookieSecret = var("COOKIE_SECRET").expect("COOKIE_SECRET is not set");
+  let cookie_secret = var("COOKIE_SECRET").expect("COOKIE_SECRET is not set");
 
-  let schema = Schema::build(graphql::QueryRoot, EmptyMutation, EmptySubscription)
-    .data(pg_pool)
-    .finish();
+  let schema = graphql::get_schema(pg_pool, cookie_secret);
 
   let hello = get_hello_route();
   let graphql_playground = get_graphql_playground_route();
@@ -64,12 +65,13 @@ async fn main() {
         async_graphql::Request,
       )| {
         async move {
-          let response = graphql::execute_graphql_request_with_cookies(schema, graphql_request, cookie_header).await;
-          Ok::<_, Infallible>(response)  
+          let response =
+            graphql::execute_graphql_request_with_cookies(schema, graphql_request, cookie_header)
+              .await;
+          Ok::<_, Infallible>(response)
         }
-      }
+      },
     );
-
 
   let routes = hello.or(graphql_playground).or(graphql_post);
   println!("Playground - http://localhost:{} ", port);
